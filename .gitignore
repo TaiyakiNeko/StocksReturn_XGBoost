@@ -51,9 +51,9 @@ ehthumbs.db
 Thumbs.db
 
 # Data and Models (optional - uncomment if needed)
-# data/
-# model/
-# output/
+data/
+model/
+output/
 
 # Environment variables
 .env
@@ -65,6 +65,3 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Model
-model

@@ -66,9 +66,43 @@ def process_day_data(day_data, model, horizon=5):
     return X_day, y_day
 
 
+def build_dataset_from_days(days, horizon=5):
+    data_path = "./data"
+    if not os.path.exists(data_path):
+        print(f"Data path {data_path} not found.")
+        return None, None
+
+    model = MyModel()
+    all_X = []
+    all_y = []
+
+    for day in days:
+        day_data = load_day_data(data_path, day)
+        X_day, y_day = process_day_data(day_data, model, horizon=horizon)
+        if X_day.size == 0:
+            continue
+        all_X.append(X_day)
+        all_y.append(y_day)
+
+    if not all_X:
+        return None, None
+
+    return np.concatenate(all_X), np.concatenate(all_y)
+
+
 def train():
-    print("Building training data...")
-    X_train, y_train = build_training_data(horizon=5)
+    print("Building datasets...")
+    data_path = "./data"
+    days = get_day_folders(data_path)
+
+    train_days = [d for d in days if d in ["1", "2", "3"]]
+    val_days = [d for d in days if d in ["4"]]
+    test_days = [d for d in days if d in ["5"]]
+
+    X_train, y_train = build_dataset_from_days(train_days, horizon=5)
+    X_val, y_val = build_dataset_from_days(val_days, horizon=5)
+    X_test, y_test = build_dataset_from_days(test_days, horizon=5)
+
     if X_train is None or y_train is None:
         return
 
@@ -86,6 +120,7 @@ def train():
         "n_jobs": -1,
         "random_state": 42,
         "eval_metric": "mae",
+        "early_stopping_rounds": 10,
     }
 
     model_dir = "./model"
@@ -94,9 +129,24 @@ def train():
     model_path = os.path.join(model_dir, "xgb_model.json")
 
     model = xgb.XGBRegressor(**params)
-    model.fit(X_train, y_train, verbose=False)
+    eval_set = []
+    if X_val is not None and y_val is not None:
+        eval_set = [(X_val, y_val)]
+
+    model.fit(
+        X_train,
+        y_train,
+        verbose=False,
+        eval_set=eval_set,
+    )
     model.save_model(model_path)
     print(f"Model saved to {model_path}")
+
+    if X_test is not None and y_test is not None:
+        preds = model.predict(X_test)
+        mae = np.mean(np.abs(preds - y_test))
+        print(f"Test MAE: {mae:.6f}")
+
 
 if __name__ == "__main__":
     train()
