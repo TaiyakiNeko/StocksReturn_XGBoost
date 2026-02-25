@@ -43,13 +43,23 @@ class MyModel:
             np.log(w / (lw + 1e-9)) if lw else np.log(w / (row[col_indices['LastPrice']] + 1e-9))
             for w, lw, row in zip(sector_WAPs, self.last_sector_WAPs, sector_rows)
         ]
+        mean_sector_log_return = float(np.mean(sector_log_returns))
 
-        weighted_sector_log_return = float(np.mean(sector_log_returns))
         E_depth_imbalance = self.compute_depth_imbalance(E_row)
+        sector_depth_imbalances = [self.compute_depth_imbalance(row) for row in sector_rows]
+        mean_sector_depth_imbalance = float(np.mean(sector_depth_imbalances))
+
         E_order_imbalance = (
             (E_row[col_indices['OrderBuyVolume']] - E_row[col_indices['OrderSellVolume']])
             / (E_row[col_indices['OrderBuyVolume']] + E_row[col_indices['OrderSellVolume']] + 1e-9)
         )
+        sector_order_imbalances = [
+            (row[col_indices['OrderBuyVolume']] - row[col_indices['OrderSellVolume']]) /
+            (row[col_indices['OrderBuyVolume']] + row[col_indices['OrderSellVolume']] + 1e-9)
+            for row in sector_rows
+        ]
+        mean_sector_order_imbalance = float(np.mean(sector_order_imbalances))
+        
         relative_spread = self.compute_relative_spread(E_row)
 
         self.last_E_WAP = E_WAP
@@ -58,9 +68,11 @@ class MyModel:
         return np.array(
             [
                 E_log_return,
-                weighted_sector_log_return,
+                mean_sector_log_return,
                 E_depth_imbalance,
+                mean_sector_depth_imbalance,
                 E_order_imbalance,
+                mean_sector_order_imbalance,
                 relative_spread,
             ],
             dtype=np.float32,

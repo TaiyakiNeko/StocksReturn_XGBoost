@@ -126,3 +126,51 @@ def compute_relative_spread_JIT(row):
     mid = (ask1 + bid1) / 2.0
     return (ask1 - bid1) / (mid + 1e-9)
 
+@njit(fastmath=True, cache=True)
+def compute_OFI_JIT(current_row, prev_row):
+    """
+    Compute Order Flow Imbalance
+    Formula: OFI = Σ(ΔBidVol * I(ΔBidPrice >= 0)) - Σ(ΔAskVol * I(ΔAskPrice <= 0))
+    """
+    ofi = 0.0
+    for i in range(5):
+        # Bid Side
+        delta_v_b = current_row[bid_volume_index[i]] - prev_row[bid_volume_index[i]]
+        delta_p_b = current_row[bid_price_index[i]] - prev_row[bid_price_index[i]]
+        if delta_p_b >= 0:
+            ofi += delta_v_b
+            
+        # Ask Side
+        delta_v_a = current_row[ask_volume_index[i]] - prev_row[ask_volume_index[i]]
+        delta_p_a = current_row[ask_price_index[i]] - prev_row[ask_price_index[i]]
+        if delta_p_a <= 0:
+            ofi -= delta_v_a
+            
+    total_vol = np.sum(current_row[bid_volume_index] + current_row[ask_volume_index])
+    return ofi / (total_vol + 1e-9)
+
+@njit(fastmath=True, cache=True)
+def compute_ob_slope_JIT(row):
+    """
+    Compute Order Book Slope
+    Formula: Slope = WeightedAvg(BidLevel) - WeightedAvg(AskLevel)
+    """
+    bid_slope_num = 0.0
+    bid_slope_den = 0.0
+    ask_slope_num = 0.0
+    ask_slope_den = 0.0
+    
+    for i in range(5):
+        weight = float(i + 1)
+        bid_vol = row[bid_volume_index[i]]
+        ask_vol = row[ask_volume_index[i]]
+        
+        bid_slope_num += weight * bid_vol
+        bid_slope_den += bid_vol
+        ask_slope_num += weight * ask_vol
+        ask_slope_den += ask_vol
+        
+    bid_slope = bid_slope_num / (bid_slope_den + 1e-9)
+    ask_slope = ask_slope_num / (ask_slope_den + 1e-9)
+    
+    return bid_slope - ask_slope

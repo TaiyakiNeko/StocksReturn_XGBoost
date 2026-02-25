@@ -50,8 +50,9 @@ env/
 ehthumbs.db
 Thumbs.db
 
-# Data and Models (optional - uncomment if needed)
+# Data and models
 data/
+train_cache/
 model/
 output/
 

@@ -108,9 +108,9 @@ def train():
 
     params = {
         "objective": "reg:absoluteerror",
-        "n_estimators": 500,
-        "learning_rate": 0.05,
-        "max_depth": 3,
+        "n_estimators": 1200,
+        "learning_rate": 0.03,
+        "max_depth": 4,
         "min_child_weight": 50,
         "subsample": 0.6,
         "colsample_bytree": 0.6,
@@ -120,7 +120,7 @@ def train():
         "n_jobs": -1,
         "random_state": 42,
         "eval_metric": "mae",
-        "early_stopping_rounds": 10,
+        "early_stopping_rounds": 20,
     }
 
     model_dir = "./model"
