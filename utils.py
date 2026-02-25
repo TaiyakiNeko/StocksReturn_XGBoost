@@ -3,14 +3,19 @@ import pandas as pd
 import numpy as np
 from numba import njit
 
-# Column definitions for numpy
-col_names = ['Time', 'BidPrice1', 'BidPrice2', 'BidPrice3', 'BidPrice4', 'BidPrice5', 
-             'BidVolume1', 'BidVolume2', 'BidVolume3', 'BidVolume4', 'BidVolume5', 
-             'AskPrice1', 'AskPrice2', 'AskPrice3', 'AskPrice4', 'AskPrice5', 
-             'AskVolume1', 'AskVolume2', 'AskVolume3', 'AskVolume4', 'AskVolume5', 
-             'OrderBuyNum', 'OrderSellNum', 'OrderBuyVolume', 'OrderSellVolume', 
-             'TradeBuyNum', 'TradeSellNum', 'TradeBuyVolume', 'TradeSellVolume', 
-             'TradeBuyAmount', 'TradeSellAmount', 'LastPrice']
+# ==============================================================================
+# Column Definitions
+# ==============================================================================
+
+col_names = [
+    'Time', 'BidPrice1', 'BidPrice2', 'BidPrice3', 'BidPrice4', 'BidPrice5', 
+    'BidVolume1', 'BidVolume2', 'BidVolume3', 'BidVolume4', 'BidVolume5', 
+    'AskPrice1', 'AskPrice2', 'AskPrice3', 'AskPrice4', 'AskPrice5', 
+    'AskVolume1', 'AskVolume2', 'AskVolume3', 'AskVolume4', 'AskVolume5', 
+    'OrderBuyNum', 'OrderSellNum', 'OrderBuyVolume', 'OrderSellVolume', 
+    'TradeBuyNum', 'TradeSellNum', 'TradeBuyVolume', 'TradeSellVolume', 
+    'TradeBuyAmount', 'TradeSellAmount', 'LastPrice'
+]
 
 col_indices = {name: i for i, name in enumerate(col_names)}
 
@@ -24,7 +29,12 @@ ask_volume_index = np.array([col_indices[f'AskVolume{i}'] for i in range(1, 6)])
 idx_BidPrice1 = col_indices['BidPrice1']
 idx_AskPrice1 = col_indices['AskPrice1']
 
+# ==============================================================================
+# Data Loading & Preprocessing
+# ==============================================================================
+
 def get_day_folders(data_path):
+    """Retrieve sorted list of day folders."""
     folders = []
     for name in os.listdir(data_path):
         full_path = os.path.join(data_path, name)
@@ -34,69 +44,63 @@ def get_day_folders(data_path):
     return folders
 
 def load_day_data(data_path, day_folder):
+    """Load and clean CSV data for all stocks."""
     day_path = os.path.join(data_path, day_folder)
     data = {}
     
-    # Pre-computation of dataframe ops
     for stock in ['A', 'B', 'C', 'D', 'E']:
         csv_path = os.path.join(day_path, f'{stock}.csv')
         if os.path.exists(csv_path):
             df = pd.read_csv(csv_path)
             
-            # Identify Price columns (Bid/Ask/Last) which should never be 0
-            # Volume can be 0, Price cannot.
-            # Convert to float first to allow np.nan
+            # Identify Price columns
             price_cols = [c for c in df.columns if 'Price' in c]
             df[price_cols] = df[price_cols].astype(float)
             
-            # Replace 0 with NaN only in Price columns
-            # Also replace 0.0 only. If it's already NaN, it stays NaN
+            # Replace 0 with NaN in Price columns
             df[price_cols] = df[price_cols].replace(0.0, np.nan)
             
-            # Forward fill to propagate last valid price
+            # Forward fill and backward fill
             df[price_cols] = df[price_cols].ffill()
-            df[price_cols] = df[price_cols].bfill() # Handle initial 0s
+            df[price_cols] = df[price_cols].bfill()
             
-            # CRITICAL FIX for Day 1/5: 
-            # If LastPrice was 0 and ffill didn't work (e.g. start of day), fill with BidPrice1
+            # Fix LastPrice if still NaN
             if 'LastPrice' in df.columns:
-                 mask = df['LastPrice'].isna()
-                 if mask.any():
-                     df.loc[mask, 'LastPrice'] = df.loc[mask, 'BidPrice1']
-                     # If BidPrice1 was also NaN (unlikely but possible), fill with 0 (bad but no choice)
-                     df['LastPrice'] = df['LastPrice'].fillna(0.0)
+                mask = df['LastPrice'].isna()
+                if mask.any():
+                    df.loc[mask, 'LastPrice'] = df.loc[mask, 'BidPrice1']
+                    df['LastPrice'] = df['LastPrice'].fillna(0.0)
 
-            # Fill any remaining NaNs (e.g. if column was all 0) with 0 or mean
-            # Ideally shouldn't happen for valid stocks
             df = df.fillna(0.0)
-            
             data[stock] = df.to_numpy()
         else:
             raise FileNotFoundError(f"Missing file: {csv_path}")
     return data
 
-
 def clean_data(data):
+    """Clean NaN and Inf values."""
     data = np.where(np.isnan(data), 0, data)
     data = np.where(np.isinf(data), 0, data)
     data = np.where(np.isinf(-data), 0, data)
     return data
 
-
 def evaluate_ic(my_preds, ground_truth):
+    """Calculate Information Coefficient."""
     data = np.vstack((my_preds, ground_truth))
     data = clean_data(data)
     cor = np.corrcoef(data)[0, 1]
     return cor
-      
+
+# ==============================================================================
+# Microstructure Features (JIT Accelerated)
+# ==============================================================================
+
 @njit(fastmath=True, cache=True)
 def compute_WAP_JIT(row):
     """
-    Compute robust WAP using all 5 levels of order book.
+    Compute robust Weighted Average Price (WAP).
     Formula:
-        numerator   = Σ(BidPrice_i * AskVolume_i) + Σ(AskPrice_i * BidVolume_i)
-        denominator = Σ(BidVolume_i + AskVolume_i)
-        This serves as the primary fair price proxy.
+    $$ \\text{WAP} = \\frac{\\sum_{i=1}^{5} (P_{bid,i} \\cdot V_{ask,i}) + \\sum_{i=1}^{5} (P_{ask,i} \\cdot V_{bid,i})}{\\sum_{i=1}^{5} (V_{bid,i} + V_{ask,i})} $$
     """
     bid_value = np.sum(row[bid_price_index] * row[ask_volume_index])
     ask_value = np.sum(row[ask_price_index] * row[bid_volume_index])
@@ -106,9 +110,9 @@ def compute_WAP_JIT(row):
 @njit(fastmath=True, cache=True)
 def compute_depth_imbalance_JIT(row):
     """
-    Compute depth imbalance as:
-        Depth Imbalance = (Σ(BidVolume_i) - Σ(AskVolume_i)) / (Σ(BidVolume_i) + Σ(AskVolume_i))
-    This captures the overall market pressure.
+    Compute Order Book Depth Imbalance.
+    Formula:
+    $$ \\text{DI} = \\frac{\\sum V_{bid} - \\sum V_{ask}}{\\sum V_{bid} + \\sum V_{ask}} $$
     """
     total_bid = np.sum(row[bid_volume_index])
     total_ask = np.sum(row[ask_volume_index])
@@ -117,9 +121,9 @@ def compute_depth_imbalance_JIT(row):
 @njit(fastmath=True, cache=True)
 def compute_relative_spread_JIT(row):
     """
-    Compute relative spread as:
-        Relative Spread = (AskPrice1 - BidPrice1) / MidPrice
-    MidPrice = (AskPrice1 + BidPrice1) / 2
+    Compute Relative Spread.
+    Formula:
+    $$ \\text{Spread} = \\frac{P_{ask,1} - P_{bid,1}}{\\text{MidPrice}}, \\quad \\text{MidPrice} = \\frac{P_{ask,1} + P_{bid,1}}{2} $$
     """
     ask1 = row[idx_AskPrice1]
     bid1 = row[idx_BidPrice1]
@@ -129,8 +133,9 @@ def compute_relative_spread_JIT(row):
 @njit(fastmath=True, cache=True)
 def compute_OFI_JIT(current_row, prev_row):
     """
-    Compute Order Flow Imbalance
-    Formula: OFI = Σ(ΔBidVol * I(ΔBidPrice >= 0)) - Σ(ΔAskVol * I(ΔAskPrice <= 0))
+    Compute Order Flow Imbalance (OFI).
+    Formula:
+    $$ \\text{OFI} = \\sum_{i=1}^{5} \\left( \\Delta V_{bid,i} \\cdot I(\\Delta P_{bid,i} \\geq 0) - \\Delta V_{ask,i} \\cdot I(\\Delta P_{ask,i} \\leq 0) \\right) $$
     """
     ofi = 0.0
     for i in range(5):
@@ -152,8 +157,10 @@ def compute_OFI_JIT(current_row, prev_row):
 @njit(fastmath=True, cache=True)
 def compute_ob_slope_JIT(row):
     """
-    Compute Order Book Slope
-    Formula: Slope = WeightedAvg(BidLevel) - WeightedAvg(AskLevel)
+    Compute Order Book Slope.
+    Formula:
+    $$ \\text{Slope} = \\text{WeightedAvg}_{bid} - \\text{WeightedAvg}_{ask} $$
+    $$ \\text{WeightedAvg} = \\frac{\\sum (w_i \\cdot V_i)}{\\sum V_i}, \\quad w_i = i $$
     """
     bid_slope_num = 0.0
     bid_slope_den = 0.0
@@ -174,3 +181,54 @@ def compute_ob_slope_JIT(row):
     ask_slope = ask_slope_num / (ask_slope_den + 1e-9)
     
     return bid_slope - ask_slope
+
+# ==============================================================================
+# New Features for Sector Linkage (JIT Accelerated)
+# ==============================================================================
+
+@njit(fastmath=True, cache=True)
+def compute_realized_volatility_JIT(returns_array):
+    """
+    Compute Realized Volatility (RV) over a window.
+    Formula:
+    $$ \\text{RV} = \\sqrt{\\sum_{t=1}^{T} r_t^2} $$
+    """
+    sum_sq = 0.0
+    for r in returns_array:
+        sum_sq += r * r
+    return np.sqrt(sum_sq)
+
+@njit(fastmath=True, cache=True)
+def compute_rolling_corr_JIT(x_array, y_array):
+    """
+    Compute Pearson Correlation Coefficient over a window.
+    Formula:
+    $$ \\rho = \\frac{\\sum (x_i - \\bar{x})(y_i - \\bar{y})}{\\sqrt{\\sum (x_i - \\bar{x})^2 \\sum (y_i - \\bar{y})^2}} $$
+    """
+    n = len(x_array)
+    if n == 0:
+        return 0.0
+    
+    mean_x = 0.0
+    mean_y = 0.0
+    for i in range(n):
+        mean_x += x_array[i]
+        mean_y += y_array[i]
+    mean_x /= n
+    mean_y /= n
+    
+    num = 0.0
+    den_x = 0.0
+    den_y = 0.0
+    
+    for i in range(n):
+        dx = x_array[i] - mean_x
+        dy = y_array[i] - mean_y
+        num += dx * dy
+        den_x += dx * dx
+        den_y += dy * dy
+        
+    den = np.sqrt(den_x * den_y)
+    if den < 1e-9:
+        return 0.0
+    return num / den
