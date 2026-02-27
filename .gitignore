@@ -55,6 +55,7 @@ data/
 train_cache/
 model/
 output/
+plot/
 
 # Environment variables
 .env

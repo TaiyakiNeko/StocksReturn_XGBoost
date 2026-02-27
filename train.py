@@ -5,33 +5,7 @@ import matplotlib.pyplot as plt
 from utils import get_day_folders, load_day_data
 from MyModel import MyModel
 
-
-def build_training_data(horizon=5):
-    data_path = "./data"
-    if not os.path.exists(data_path):
-        print(f"Data path {data_path} not found.")
-        return None, None
-
-    days = get_day_folders(data_path)
-    model = MyModel()
-    all_X = []
-    all_y = []
-
-    for day in days:
-        day_data = load_day_data(data_path, day)
-        X_day, y_day = process_day_data(day_data, model, horizon=horizon)
-        if X_day.size == 0:
-            continue
-        all_X.append(X_day)
-        all_y.append(y_day)
-
-    if not all_X:
-        return None, None
-
-    return np.concatenate(all_X), np.concatenate(all_y)
-
-
-def process_day_data(day_data, model, horizon=5):
+def process_day_data(day_data, model, horizon=10):
     all_X = []
     all_y = []
 
@@ -56,7 +30,7 @@ def process_day_data(day_data, model, horizon=5):
         future_row = target_df[tick_index + horizon]
         cur_wap = model.compute_WAP(target_row)
         fut_wap = model.compute_WAP(future_row)
-        y = np.log((fut_wap + 1e-9) / (cur_wap + 1e-9))
+        y = np.log((fut_wap + 1e-9) / (cur_wap + 1e-9)) * 10000
 
         all_X.append(features)
         all_y.append(y)
@@ -67,7 +41,7 @@ def process_day_data(day_data, model, horizon=5):
     return X_day, y_day
 
 
-def build_dataset_from_days(days, horizon=5):
+def build_dataset_from_days(days, horizon=10):
     data_path = "./data"
     if not os.path.exists(data_path):
         print(f"Data path {data_path} not found.")
@@ -143,7 +117,7 @@ def train():
     day_data_list = []
     for day in kfold_days:
         day_data = load_day_data("./data", day)
-        X_day, y_day = process_day_data(day_data, MyModel(), horizon=5)
+        X_day, y_day = process_day_data(day_data, MyModel(), horizon=10)
         if X_day.size == 0:
             continue
         day_data_list.append((X_day, y_day))
@@ -152,19 +126,19 @@ def train():
     print("Starting 4-Fold CV on Day1-4...")
     params = {
         "objective": "reg:absoluteerror",
-        "n_estimators": 500,
-        "learning_rate": 0.05,
-        "max_depth": 4,
-        "min_child_weight": 50,
-        "subsample": 0.6,
-        "colsample_bytree": 0.6,
-        "reg_alpha": 1.0,
-        "reg_lambda": 10.0,
-        "gamma": 2.0,
+        "n_estimators": 5000,          
+        "learning_rate": 0.005,         
+        "max_depth": 8,              
+        "min_child_weight": 5,        
+        "subsample": 0.8,              
+        "colsample_bytree": 0.8,      
+        "reg_alpha": 0.1,              
+        "reg_lambda": 1.0,           
+        "gamma": 0.1,                 
         "n_jobs": -1,
         "random_state": 42,
         "eval_metric": "mae",
-        "early_stopping_rounds": 20,
+        "early_stopping_rounds": 50,  
     }
 
     fold_maes = []
@@ -191,9 +165,9 @@ def train():
     # Train final model on Day1-3, validate on Day4, test on Day5
     train_days = [d for d in days if d in ["1", "2", "3"]]
     val_days = [d for d in days if d in ["4"]]
-    X_train, y_train = build_dataset_from_days(train_days, horizon=5)
-    X_val, y_val = build_dataset_from_days(val_days, horizon=5)
-    X_test, y_test = build_dataset_from_days(test_days, horizon=5)
+    X_train, y_train = build_dataset_from_days(train_days, horizon=10)
+    X_val, y_val = build_dataset_from_days(val_days, horizon=10)
+    X_test, y_test = build_dataset_from_days(test_days, horizon=10)
 
     if X_train is None or y_train is None:
         return

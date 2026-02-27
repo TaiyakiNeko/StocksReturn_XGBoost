@@ -228,4 +228,4 @@ class MyModel:
         X_input = feature_vec.reshape(1, -1)
         X_input = np.clip(X_input, -10, 10)
         prediction = self.model.predict(X_input)
-        return float(prediction[0])
+        return float(prediction[0] / 10000)
